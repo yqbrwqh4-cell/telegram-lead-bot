@@ -1,74 +1,103 @@
-import logging
-import csv
 import os
-from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import requests
+from flask import Flask, request, jsonify
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+import threading
 
-# טוקן הבוט מ-BotFather
-BOT_TOKEN = "8892146412:AAG7PMu0EuSTM1k8vn92GrddMzDOEXJUQl0"
+# הגדרות טוקנים
+BOT_TOKEN = "123456789:ABCdefGhIJKlmNoPQRsTUVwXyz" # ודא שהטוקן האמיתי שלך כאן!
+AIRTABLE_PAT = os.environ.get("AIRTABLE_PAT", "")
+AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")
+AIRTABLE_TABLE_NAME = os.environ.get("AIRTABLE_TABLE_NAME", "Leads")
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+app = Flask(__name__)
+telegram_app = None
 
-def save_response(user_id, username, full_name, choice):
-    file_exists = os.path.isfile('responses.csv')
-    with open('responses.csv', mode='a', newline='', encoding='utf-8') as file:
-        writer = csv.writer(file)
-        if not file_exists:
-            writer.writerow(['Date', 'User ID', 'Username', 'Name', 'Choice'])
-        writer.writerow([
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            user_id,
-            username,
-            full_name,
-            choice
-        ])
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("❌ אני מסרב", callback_data="אני מסרב")],
-        [InlineKeyboardButton("🚫 הלקוח ביטל", callback_data="הלקוח ביטל")],
-        [InlineKeyboardButton("⚠️ לא רלוונטי", callback_data="לא רלוונטי")],
-        [InlineKeyboardButton("📅 לדחות לזמן אחר", callback_data="לדחות לזמן אחר")],
-        [InlineKeyboardButton("❓ אחר", callback_data="אחר")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(
-        "👋 שלום! אנא בחר את סטטוס הפגישה/הליד:",
-        reply_markup=reply_markup
-    )
-
-async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# 1. טיפול בלחיצה על כפתור בטלגרם
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    choice = query.data
-    user = query.from_user
-    
-    save_response(
-        user_id=user.id,
-        username=user.username or "",
-        full_name=f"{user.first_name or ''} {user.last_name or ''}".strip(),
-        choice=choice
+    # חילוץ הנתונים מהכפתור (action_status_recordId)
+    data_parts = query.data.split("_", 2)
+    if len(data_parts) < 3:
+        await query.edit_message_text("שגיאה במבנה הנתונים.")
+        return
+
+    action, status, record_id = data_parts
+
+    # עדכון ב-Airtable במידה ויש מפתחות מוגדרים
+    if AIRTABLE_PAT and AIRTABLE_BASE_ID:
+        url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}/{record_id}"
+        headers = {
+            "Authorization": f"Bearer {AIRTABLE_PAT}",
+            "Content-Type": "application/json"
+        }
+        payload = {"fields": {"Status": status}}
+        requests.patch(url, json=payload, headers=headers)
+
+    await query.edit_message_text(f"✅ הסטטוס עודכן ל: **{status}**")
+
+# 2. נקודת קצה (Endpoint) לקבלת ליד מ-Airtable
+@app.route('/webhook/lead', methods=['POST'])
+def receive_lead():
+    data = request.json or {}
+    record_id = data.get('record_id', '')
+    name = data.get('name', 'לקוח חדש')
+    meeting_time = data.get('meeting_time', 'לא נקבע')
+    call_time = data.get('call_time', 'לא נקבע')
+    chat_id = data.get('telegram_id')
+
+    if not chat_id:
+        return jsonify({"error": "Missing telegram_id"}), 400
+
+    text = (
+        f"🚨 **ליד חדש נכנס!**\n\n"
+        f"👤 **שם:** {name}\n"
+        f"📅 **פגישה בשעה:** {meeting_time}\n"
+        f"📞 **שיחה בשעה:** {call_time}\n\n"
+        f"האם אתה לוקח את המשימה?"
     )
 
-    await query.edit_message_text(
-        text=f"✅ תודה! הסטטוס שנבחר ונרשם בהצלחה: *{choice}*",
-        parse_mode="Markdown"
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ מורשה/מאשר", callback_data=f"accept_מאשר_{record_id}"),
+            InlineKeyboardButton("❌ דוחה/מסרב", callback_data=f"reject_מסרב_{record_id}")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # שליחת ההודעה לטלגרם
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        json={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "Markdown",
+            "reply_markup": reply_markup.to_dict()
+        }
     )
+    return jsonify({"status": "success"}), 200
+
+@app.route('/')
+def home():
+    return "Bot is running!", 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    global telegram_app
+    telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
+    telegram_app.add_handler(CallbackQueryHandler(button_callback))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_click))
+    # הרצת Flask ברקע כדי לקבל Webhooks מ-Airtable
+    threading.Thread(target=run_flask, daemon=True).start()
 
-    print("🤖 הבוט פועל כעת...")
-    app.run_polling()
+    # הרצת הבוט מול טלגרם
+    telegram_app.run_polling()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
