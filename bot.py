@@ -6,7 +6,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # טוקן הבוט מ-BotFather
-BOT_TOKEN = "הדבק_כאן_את_הטוקן_שלך"
+BOT_TOKEN = "8892146412:AAG7PMu0EuSTM1k8vn92GrddMzDOEXJUQl0"
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
