@@ -6,7 +6,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 import threading
 
 # הגדרות טוקנים
-BOT_TOKEN = "123456789:ABCdefGhIJKlmNoPQRsTUVwXyz" # ודא שהטוקן האמיתי שלך כאן!
+BOT_TOKEN = "8892146412:AAG7PMu0EuSTM1k8vn92GrddMzDOEXJUQl0" # ודא שהטוקן האמיתי שלך כאן!
 AIRTABLE_PAT = os.environ.get("AIRTABLE_PAT", "")
 AIRTABLE_BASE_ID = os.environ.get("AIRTABLE_BASE_ID", "")
 AIRTABLE_TABLE_NAME = os.environ.get("AIRTABLE_TABLE_NAME", "Leads")
